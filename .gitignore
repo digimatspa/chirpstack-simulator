@@ -4,6 +4,7 @@
 # config
 /*.toml
 /*.json
+/test.js
 
 # builds
 /build/

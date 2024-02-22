@@ -11,6 +11,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"io/ioutil"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/gofrs/uuid"
@@ -36,23 +37,43 @@ func Start(ctx context.Context, wg *sync.WaitGroup, c config.Config) error {
 
 		wg.Add(1)
 
-		pl, err := hex.DecodeString(c.Device.Payload)
-		if err != nil {
-			return errors.Wrap(err, "decode payload error")
+		var deviceList = make([]device, len(c.Device))
+
+		for j, d := range c.Device {
+			pl, err := hex.DecodeString(d.Payload)
+			if err != nil {
+				return errors.Wrap(err, "decode payload error")
+			}
+
+			bytesDevEUI, err := hex.DecodeString(d.DevEUI)
+			if err != nil {
+			    return errors.Wrap(err, "decode DevEUI error")
+			}
+
+			var _devEUI = lorawan.EUI64{bytesDevEUI[0], bytesDevEUI[1], bytesDevEUI[2], bytesDevEUI[3], bytesDevEUI[4], bytesDevEUI[5], bytesDevEUI[6], bytesDevEUI[7]}
+
+			aDevice := device{
+				devEUI:				  _devEUI,
+				fPort:                d.FPort,
+				payload:              pl,
+				frequency:            d.Frequency,
+				bandwidth:            d.Bandwidth,
+				spreadingFactor:      d.SpreadingFactor,
+				uplinkInterval:       d.UplinkInterval,
+			}
+
+			deviceList[j] = aDevice
 		}
 
 		sim := simulation{
 			ctx:                  ctx,
 			wg:                   wg,
 			tenantID:             c.TenantID,
-			deviceCount:          c.Device.Count,
 			activationTime:       c.ActivationTime,
-			uplinkInterval:       c.Device.UplinkInterval,
-			fPort:                c.Device.FPort,
-			payload:              pl,
-			frequency:            c.Device.Frequency,
-			bandwidth:            c.Device.Bandwidth,
-			spreadingFactor:      c.Device.SpreadingFactor,
+			codecRuntime:         c.CodecRuntime,
+			payloadCodecScript:   c.PayloadCodecScript,
+			
+			devices:			  deviceList,
 			duration:             c.Duration,
 			gatewayMinCount:      c.Gateway.MinCount,
 			gatewayMaxCount:      c.Gateway.MaxCount,
@@ -67,22 +88,28 @@ func Start(ctx context.Context, wg *sync.WaitGroup, c config.Config) error {
 	return nil
 }
 
-type simulation struct {
-	ctx             context.Context
-	wg              *sync.WaitGroup
-	tenantID        string
-	deviceCount     int
-	gatewayMinCount int
-	gatewayMaxCount int
-	duration        time.Duration
-
+type device struct {
+	devEUI			lorawan.EUI64
 	fPort           uint8
 	payload         []byte
-	activationTime  time.Duration
 	uplinkInterval  time.Duration
 	frequency       int
 	bandwidth       int
 	spreadingFactor int
+}
+
+type simulation struct {
+	ctx             context.Context
+	wg              *sync.WaitGroup
+	tenantID        string
+	activationTime  time.Duration
+	gatewayMinCount int
+	gatewayMaxCount int
+	duration        time.Duration
+	codecRuntime    string
+	payloadCodecScript  string
+
+	devices 			[]device
 
 	tenant               *api.Tenant
 	deviceProfileID      uuid.UUID
@@ -194,7 +221,7 @@ func (s *simulation) runSimulation() error {
 	}
 	defer cancel()
 
-	for devEUI, appKey := range s.deviceAppKeys {
+	for _, dev := range s.devices {
 		devGateways := make(map[int]*simulator.Gateway)
 		devNumGateways := s.gatewayMinCount + mrand.Intn(s.gatewayMaxCount-s.gatewayMinCount+1)
 
@@ -210,19 +237,19 @@ func (s *simulation) runSimulation() error {
 		}
 
 		d, err := simulator.NewDevice(ctx, &wg,
-			simulator.WithDevEUI(devEUI),
-			simulator.WithAppKey(appKey),
-			simulator.WithUplinkInterval(s.uplinkInterval),
+			simulator.WithDevEUI(dev.devEUI),
+			simulator.WithAppKey(s.deviceAppKeys[dev.devEUI]),
+			simulator.WithUplinkInterval(dev.uplinkInterval),
 			simulator.WithOTAADelay(time.Duration(mrand.Int63n(int64(s.activationTime)))),
-			simulator.WithUplinkPayload(false, s.fPort, s.payload),
+			simulator.WithUplinkPayload(false, dev.fPort, dev.payload),
 			simulator.WithGateways(gws),
 			simulator.WithUplinkTXInfo(gw.UplinkTxInfo{
-				Frequency: uint32(s.frequency),
+				Frequency: uint32(dev.frequency),
 				Modulation: &gw.Modulation{
 					Parameters: &gw.Modulation_Lora{
 						Lora: &gw.LoraModulationInfo{
-							Bandwidth:       uint32(s.bandwidth),
-							SpreadingFactor: uint32(s.spreadingFactor),
+							Bandwidth:       uint32(dev.bandwidth),
+							SpreadingFactor: uint32(dev.spreadingFactor),
 							CodeRate:        gw.CodeRate_CR_4_5,
 						},
 					},
@@ -316,6 +343,30 @@ func (s *simulation) setupDeviceProfile() error {
 
 	dpName, _ := uuid.NewV4()
 
+	var codecRuntime = api.CodecRuntime_NONE
+	if s.codecRuntime == "JS"{
+		codecRuntime = api.CodecRuntime_JS
+	} else if s.codecRuntime == "CAYENNE_LPP" {
+		codecRuntime = api.CodecRuntime_CAYENNE_LPP
+	} else {
+		return errors.New("unknown codec runtime")
+	}
+
+	var payloadCodecScript string
+	if s.payloadCodecScript != "" {
+		content, error := ioutil.ReadFile(s.payloadCodecScript)
+
+		// Check whether the 'error' is nil or not. If it 
+		//is not nil, then print the error and exit.
+		if error != nil {
+
+			errors.Wrap(error, "decode file reading error")
+		}
+
+	    // convert the content into a string
+	    payloadCodecScript = string(content)
+	}
+
 	resp, err := as.DeviceProfile().Create(context.Background(), &api.CreateDeviceProfileRequest{
 		DeviceProfile: &api.DeviceProfile{
 			Name:              dpName.String(),
@@ -325,6 +376,8 @@ func (s *simulation) setupDeviceProfile() error {
 			SupportsOtaa:      true,
 			Region:            common.Region_EU868,
 			AdrAlgorithmId:    "default",
+			PayloadCodecRuntime: codecRuntime,
+			PayloadCodecScript:	 payloadCodecScript,
 		},
 	})
 	if err != nil {
@@ -393,16 +446,15 @@ func (s *simulation) setupDevices() error {
 
 	var wg sync.WaitGroup
 
-	for i := 0; i < s.deviceCount; i++ {
+	for i := 0; i < len(s.devices); i++ {
 		wg.Add(1)
+		
+		var devEUI = s.devices[i].devEUI
 
-		go func() {
-			var devEUI lorawan.EUI64
+		go func(devEUI lorawan.EUI64) {
 			var appKey lorawan.AES128Key
 
-			if _, err := rand.Read(devEUI[:]); err != nil {
-				log.Fatal(err)
-			}
+			
 			if _, err := rand.Read(appKey[:]); err != nil {
 				log.Fatal(err)
 			}
@@ -437,7 +489,7 @@ func (s *simulation) setupDevices() error {
 			s.deviceAppKeys[devEUI] = appKey
 			s.deviceAppKeysMutex.Unlock()
 			wg.Done()
-		}()
+		}(devEUI)
 
 	}
 

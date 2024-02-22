@@ -116,11 +116,17 @@ duration="5m"
 # value must be less than the simulator duration.
 activation_time="1m"
 
-  # Device configuration.
-  [simulator.device]
+# Codec Runtime (NONE, CAYENNE_LPP, JS)
+codec_runtime = "NONE"
 
-  # Number of devices to simulate.
-  count=1000
+# Payload codec script relative to executable
+payload_codec_script = "/etc/conf/script.js"
+
+  # Device configuration.
+  [[simulator.device]]
+
+  # EUI of the device to simulate (HEX encoded)
+  dev_eui="2020202020202020"
 
   # Uplink interval.
   uplink_interval="5m"
@@ -203,6 +209,13 @@ The ChirpStack Simulator provides various metrics that can be collected using
 * `application_uplink_count`: The number of uplinks published by the application integration
 * `gateway_uplink_count`: The number of uplinks sent by the gateways
 * `gateway_downlink_count`: The number of downlinks received by the gateways
+
+## Changed parameters
+- Device profile codec runtime parameter was added. It can be of NONE, CAYENNE_LPP and JS
+- Payload codec javascript path was added. It can be absolute or relative to executable
+- Device EUI parameter was added to device (mandatory)
+- Number of devices to simulate was removed in favor of multiple devices configuration
+
 
 ## License
 

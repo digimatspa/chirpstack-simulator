@@ -96,11 +96,17 @@ const configTemplate = `[general]
 # # value must be less than the simulator duration.
 # activation_time="1m"
 #
-#   # Device configuration.
-#   [simulator.device]
+# # Codec Runtime (NONE, CAYENNE_LPP, JS)
+# codec_runtime = "NONE"
 #
-#   # Number of devices to simulate.
-#   count=1000
+# # Payload codec script relative to executable
+# payload_codec_script = ""
+#
+#   # Device configuration.
+#   [[simulator.device]]
+# 
+#   #EUI of the device to simulate.
+#   dev_eui=""
 #
 #   # Uplink interval.
 #   uplink_interval="5m"
@@ -139,9 +145,11 @@ const configTemplate = `[general]
 service_profile_id="{{ $element.ServiceProfileID }}"
 duration="{{ $element.Duration }}"
 activation_time="{{ $element.ActivationTime }}"
+codec_runtime = "NONE"
+payload_codec_script = ""
 
-  [simulator.device]
-  count={{ $element.Device.Count }}
+  [[simulator.device]]
+  dev_eui=""
   uplink_interval="{{ $element.Device.UplinkInterval }}"
   f_port="{{ $element.Device.FPort }}"
   payload="{{ $element.Device.Payload }}"

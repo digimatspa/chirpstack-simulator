@@ -43,9 +43,12 @@ type Config struct {
 		TenantID       string        `mapstructure:"tenant_id"`
 		Duration       time.Duration `mapstructure:"duration"`
 		ActivationTime time.Duration `mapstructure:"activation_time"`
+		CodecRuntime   string        `mapstructure:"codec_runtime"`
+		PayloadCodecScript  string   `mapstructure:"payload_codec_script"`
 
-		Device struct {
-			Count           int           `mapstructure:"count"`
+		Device []struct {
+			DevEUI       	string        `mapstructure:"dev_eui"`
+			AppKey       	string        `mapstructure:"app_key"`
 			UplinkInterval  time.Duration `mapstructure:"uplink_interval"`
 			FPort           uint8         `mapstructure:"f_port"`
 			Payload         string        `mapstructure:"payload"`
